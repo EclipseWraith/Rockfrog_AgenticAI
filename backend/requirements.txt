@@ -2,20 +2,19 @@ Flask==2.3.2
 flask-cors==3.0.10
 python-dotenv==1.0.0
 
-# LangChain + community (compatible 0.1.x family)
+# ---- LangChain 0.1.x compatible family ----
 langchain==0.1.14
 langchain-core==0.1.40
 langchain-community==0.0.28
+langsmith==0.0.92
 
-# LangGraph (keep if your agent uses it)
+# ---- LangGraph compatible with LC 0.1.x ----
 langgraph==0.0.20
 
-# Bridge for Gemini (LangChain v0.1 plugin)
+# ---- Gemini integration (LangChain bridge) ----
 langchain-google-genai==1.0.9
-
-# Google generative SDK used by LC plugin
 google-generativeai==0.8.2
 
-# Server / optional
+# ---- Runtime / optional ----
 gunicorn==20.1.0
 redis==4.6.0
