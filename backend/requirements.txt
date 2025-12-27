@@ -3,17 +3,17 @@ flask-cors==3.0.10
 python-dotenv==1.0.0
 
 # --- LangChain Compatible Stack ---
-langchain==0.1.0
-langchain-core==0.1.33
-langchain-community==0.0.24
+langchain==0.1.14
+langchain-community==0.0.28
+langchain-core==0.1.40
 
-# Gemini + LangChain bridge (compatible range)
+# Gemini bridge compatible with LC 0.1.x
 langchain-google-genai==1.0.9
 
-# LangGraph version compatible with LC 0.1
+# LangGraph version compatible with LC 0.1.x
 langgraph==0.0.20
 
-# Gemini SDK (used under the hood by LC plugin)
+# Gemini SDK used by LC
 google-generativeai==0.8.2
 
 # Server / optional
