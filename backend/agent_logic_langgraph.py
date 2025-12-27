@@ -78,7 +78,8 @@ def get_available_model():
     
     raise ValueError("No available Gemini models found. Check API key and quota.")
 
-MODEL_NAME = get_available_model()
+MODEL_NAME = None  # lazy-load later
+
 
 # ============================================================================
 # LangGraph State Schema Definition
@@ -254,10 +255,20 @@ Patient:"""
 def generate_response(prompt: str) -> str:
     """Generate response using Gemini API with retry logic for rate limiting"""
     import time
-    
+    global MODEL_NAME
+
+    # Lazily choose a model only when actually invoked
+    if MODEL_NAME is None:
+        try:
+            MODEL_NAME = get_available_model()
+        except Exception as e:
+            # Do not crash during import — fallback to a safe default name
+            print("⚠️ LangGraph model discovery failed, using fallback model name.")
+            MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+
     max_retries = 3
     retry_delay = 2
-    
+
     for attempt in range(max_retries):
         try:
             if USE_NEW_CLIENT and client:
@@ -270,22 +281,36 @@ def generate_response(prompt: str) -> str:
                 model = genai.GenerativeModel(MODEL_NAME)
                 response = model.generate_content(prompt)
                 return response.text
+
         except Exception as e:
             error_msg = str(e)
+
             # Check if it's a rate limit error
-            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "quota" in error_msg.lower():
+            if (
+                "429" in error_msg
+                or "RESOURCE_EXHAUSTED" in error_msg
+                or "quota" in error_msg.lower()
+            ):
                 if attempt < max_retries - 1:
-                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
-                    print(f"⚠️  Rate limit hit. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
+                    wait_time = retry_delay * (2 ** attempt)
+                    print(f"⚠️  Rate limit hit. Waiting {wait_time}s before retry {attempt+1}/{max_retries}")
                     time.sleep(wait_time)
                     continue
                 else:
-                    return "I'm experiencing high demand right now. Please wait a moment and try again."
-            else:
-                print(f"Error generating response: {error_msg[:100]}")
-                return f"I'm having trouble responding right now. Please try again. (Error: {error_msg[:100]})"
-    
+                    return (
+                        "I'm experiencing high demand right now. "
+                        "Please wait a moment and try again."
+                    )
+
+            # Non-rate-limit errors — do NOT crash runtime
+            print(f"Error generating response: {error_msg[:100]}")
+            return (
+                "I'm having trouble responding right now. Please try again. "
+                f"(Error: {error_msg[:100]})"
+            )
+
     return "I'm experiencing technical difficulties. Please try again in a moment."
+
 
 def format_history(history: list) -> str:
     """Format conversation history for prompt"""

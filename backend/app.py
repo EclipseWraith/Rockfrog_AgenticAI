@@ -3,8 +3,9 @@ import os
 import uuid
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-# Using LangGraph implementation for state management
-from agent_logic_langgraph import get_or_create_agent_for_session, handle_user_message
+# Using LangGraph implementation for state management# Runtime-adaptive agent API (will use LangGraph if available, else fallback Gemini)
+from agent_runtime_adapter import get_or_create_agent_for_session, handle_user_message
+
 from dotenv import load_dotenv
 
 load_dotenv()
