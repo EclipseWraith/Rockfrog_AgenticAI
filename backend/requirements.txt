@@ -2,7 +2,24 @@ Flask==2.3.2
 flask-cors==3.0.10
 python-dotenv==1.0.0
 
+<<<<<<< HEAD
 # Gemini official client (or google-generativeai older)
 google-genai>=1.0.0
+=======
+# ---- LangChain 0.1.x compatible family ----
+langchain==0.1.14
+langchain-core==0.1.40
+langchain-community==0.0.28
+langsmith==0.0.92
 
+# ---- LangGraph compatible with LC 0.1.x ----
+langgraph==0.0.20
+
+# ---- Gemini integration (LangChain bridge) ----
+langchain-google-genai==1.0.9
+google-generativeai==0.8.2
+>>>>>>> 0ec28392f28517250a61590b5910a4f4a700d9ac
+
+# ---- Runtime / optional ----
 gunicorn==20.1.0
+redis==4.6.0
