@@ -3,7 +3,6 @@
 import os
 from typing import TypedDict, Annotated, Literal
 from dotenv import load_dotenv
-from langchain.memory import ConversationBufferMemory
 from langgraph.graph import StateGraph, END
 
 # Try the newer Client API import, fallback to standard import
@@ -34,16 +33,16 @@ if not os.environ.get("GEMINI_API_KEY"):
 if USE_NEW_CLIENT:
     try:
         client = genai.Client()
-        print("✅ Using newer Google Generative AI Client API")
+        print("[INFO] Using newer Google Generative AI Client API")
     except Exception as e:
-        print(f"⚠️  New Client API failed: {e}, falling back to standard API")
+        print(f"[WARNING] New Client API failed: {e}, falling back to standard API")
         USE_NEW_CLIENT = False
         genai.configure(api_key=GEMINI_API_KEY)
         client = None
 else:
     genai.configure(api_key=GEMINI_API_KEY)
     client = None
-    print("✅ Using standard Google Generative AI API")
+    print("[INFO] Using standard Google Generative AI API")
 
 # Find an available model (prioritize free-tier models)
 def get_available_model():
@@ -66,14 +65,14 @@ def get_available_model():
             else:
                 model = genai.GenerativeModel(model_name)
                 test_response = model.generate_content("test")
-            print(f"✅ Using model: {model_name}")
+            print(f"[INFO] Using model: {model_name}")
             return model_name
         except Exception as e:
             error_msg = str(e)
             if "404" not in error_msg and "not found" not in error_msg.lower() and "429" not in error_msg:
-                print(f"✅ Using model: {model_name} (test had minor issue, but will try)")
+                print(f"[INFO] Using model: {model_name} (test had minor issue, but will try)")
                 return model_name
-            print(f"❌ Model {model_name} not available: {error_msg[:50]}")
+            print(f"[ERROR] Model {model_name} not available: {error_msg[:50]}")
             continue
     
     raise ValueError("No available Gemini models found. Check API key and quota.")
@@ -252,65 +251,110 @@ Patient:"""
 # Helper Functions
 # ============================================================================
 
-def generate_response(prompt: str) -> str:
-    """Generate response using Gemini API with retry logic for rate limiting"""
-    import time
+def _call_gemini_llm_raw(prompt: str) -> str:
+    """
+    Low-level call that actually invokes the Gemini SDK (new or legacy),
+    returning a plain string. This isolates the direct SDK usage so a
+    LangChain wrapper can call it safely.
+    """
     global MODEL_NAME
-
-    # Lazily choose a model only when actually invoked
+    # Choose model lazily if not chosen yet
     if MODEL_NAME is None:
         try:
             MODEL_NAME = get_available_model()
         except Exception as e:
-            # Do not crash during import — fallback to a safe default name
-            print("⚠️ LangGraph model discovery failed, using fallback model name.")
-            MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+            print(f"[WARNING] Model discovery failed in raw call: {e}. Using fallback.")
+            MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
+    # Actual SDK call (same logic you already have)
+    try:
+        if USE_NEW_CLIENT and client:
+            response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+            # New client responses have `.text` or `.content`
+            return getattr(response, "text", getattr(response, "content", str(response)))
+        else:
+            # legacy API usage
+            if genai is None:
+                raise RuntimeError("No genai SDK available.")
+            model = genai.GenerativeModel(MODEL_NAME)
+            response = model.generate_content(prompt)
+            return getattr(response, "text", str(response))
+    except Exception as e:
+        # Let caller handle fallback / retries — return error string
+        err = f"(Gemini call failed: {str(e)[:200]})"
+        print("Error in _call_gemini_llm_raw:", err)
+        raise
+
+def generate_response(prompt: str) -> str:
+    """
+    Main generation entrypoint used by nodes.
+    Tries using a LangChain PromptTemplate + LLMChain (if langchain available),
+    otherwise falls back to direct Gemini calls with retry logic.
+    """
+    import time, traceback
+
+    # Ensure Gemini client/module is initialized (lazy)
+    try:
+        _init_genai_client()
+    except Exception:
+        traceback.print_exc()
+
+    # If LangChain is installed, try to use a small PromptTemplate + LLMChain.
+    # We create a tiny adapter LLM that delegates to our _call_gemini_llm_raw.
+    try:
+        from langchain.prompts import PromptTemplate
+        from langchain.chains import LLMChain
+        from langchain.llms.base import LLM
+
+        class _GeminiAdapterLLM(LLM):
+            """Tiny LangChain LLM adapter that calls our Gemini raw function."""
+            def _call(self, prompt_text: str, stop: list | None = None) -> str:
+                # Delegate to the real Gemini call; re-raise so the chain will handle errors.
+                return _call_gemini_llm_raw(prompt_text)
+
+            def _identifying_params(self):
+                return {"name": "gemini-adapter"}
+
+            @property
+            def _llm_type(self):
+                return "gemini-adapter"
+
+        try:
+            prompt_template = PromptTemplate(input_variables=["prompt"], template="{prompt}")
+            chain = LLMChain(llm=_GeminiAdapterLLM(), prompt=prompt_template)
+            # run the chain (this will call our adapter, which calls Gemini)
+            return chain.run(prompt=prompt)
+        except Exception as chain_exc:
+            # LangChain present but something in the chain failed - fall back
+            print("[WARNING] LangChain chain.run failed, falling back to raw calls:", str(chain_exc)[:200])
+
+    except Exception:
+        # LangChain not installed or import failed — we'll silently fall back
+        pass
+
+    # Fallback: do the original retry logic and raw SDK calls.
     max_retries = 3
     retry_delay = 2
 
     for attempt in range(max_retries):
         try:
-            if USE_NEW_CLIENT and client:
-                response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=prompt
-                )
-                return response.text
-            else:
-                model = genai.GenerativeModel(MODEL_NAME)
-                response = model.generate_content(prompt)
-                return response.text
-
+            return _call_gemini_llm_raw(prompt)
         except Exception as e:
             error_msg = str(e)
-
-            # Check if it's a rate limit error
-            if (
-                "429" in error_msg
-                or "RESOURCE_EXHAUSTED" in error_msg
-                or "quota" in error_msg.lower()
-            ):
+            # Basic rate-limit/backoff handling (same idea as before)
+            if ("429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg or "quota" in error_msg.lower()):
                 if attempt < max_retries - 1:
                     wait_time = retry_delay * (2 ** attempt)
-                    print(f"⚠️  Rate limit hit. Waiting {wait_time}s before retry {attempt+1}/{max_retries}")
+                    print(f"[WARNING] Rate limit hit. Waiting {wait_time}s before retry {attempt+1}/{max_retries}")
                     time.sleep(wait_time)
                     continue
                 else:
-                    return (
-                        "I'm experiencing high demand right now. "
-                        "Please wait a moment and try again."
-                    )
+                    return "I'm experiencing high demand right now. Please try again shortly."
+            # Non-rate errors: log and return a friendly message
+            print(f"Error generating response (final attempt): {error_msg[:200]}")
+            return f"I'm having trouble responding right now. (Error: {error_msg[:200]})"
 
-            # Non-rate-limit errors — do NOT crash runtime
-            print(f"Error generating response: {error_msg[:100]}")
-            return (
-                "I'm having trouble responding right now. Please try again. "
-                f"(Error: {error_msg[:100]})"
-            )
-
-    return "I'm experiencing technical difficulties. Please try again in a moment."
-
+    return "I'm experiencing technical difficulties. Please try again later."
 
 def format_history(history: list) -> str:
     """Format conversation history for prompt"""
@@ -413,7 +457,7 @@ def get_or_create_agent_for_session(session_id: str):
             "treatment_detected": False,
             "treatment_accepted": False
         }
-        print(f"✅ Created LangGraph agent for session: {session_id}")
+        print(f"[INFO] Created LangGraph agent for session: {session_id}")
     
     return SESSIONS[session_id]
 
@@ -471,4 +515,3 @@ def handle_user_message(agent_obj: dict, session_id: str, user_message: str) -> 
         import traceback
         traceback.print_exc()
         return f"I'm having trouble responding right now. Please try again. (Error: {error_msg[:100]})"
-

@@ -3,8 +3,9 @@ import os
 import uuid
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-# Using LangGraph implementation for state management# Runtime-adaptive agent API (will use LangGraph if available, else fallback Gemini)
-from agent_runtime_adapter import get_or_create_agent_for_session, handle_user_message
+# Using LangGraph implementation for state management
+from agent_logic_langgraph import get_or_create_agent_for_session, handle_user_message
+
 
 from dotenv import load_dotenv
 
@@ -72,5 +73,7 @@ def logs(session_id):
 def health():
     return jsonify({"status": "healthy", "service": "patient-chatbot-api"}), 200
 
-#if __name__ == "__main__":
-    #app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=True)
+application = app
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8000)), debug=True)
