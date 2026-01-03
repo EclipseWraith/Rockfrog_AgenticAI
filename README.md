@@ -268,6 +268,3 @@ The project is provided under a permissive license. Include a `LICENSE` file in 
 
 For questions or contributions, open an issue or pull request in the repository. Include clear reproduction steps and environment details.
 
----
-
-*Prepared to be clear, concise, and usable for developers, maintainers, and reviewers.*
